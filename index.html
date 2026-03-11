@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>荷重表智能判讀與作業半徑計算</title>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" />
+    
+    <style>
+        body { font-family: sans-serif; padding: 20px; max-width: 900px; margin: auto; line-height: 1.6; background-color: #f4f7f6; }
+        .section { margin-bottom: 25px; padding: 20px; border: 1px solid #ddd; border-radius: 10px; background-color: #ffffff; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        h2 { text-align: center; color: #333; }
+        h3 { color: #0056b3; border-bottom: 2px solid #e9ecef; padding-bottom: 5px; }
+        
+        input[type="number"] { padding: 10px; margin-top: 5px; font-size: 16px; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; }
+        .btn { padding: 12px 15px; margin-top: 10px; font-size: 16px; color: white; border: none; border-radius: 8px; cursor: pointer; width: 100%; font-weight: bold; transition: 0.2s; }
+        .btn-camera { background-color: #28a745; }
+        .btn-camera:hover { background-color: #218838; }
+        .btn-upload { background-color: #17a2b8; margin-top: 15px; }
+        .btn-upload:hover { background-color: #138496; }
+        .btn-calc { background-color: #007bff; font-size: 18px; margin-top: 20px; }
+        .btn-calc:hover { background-color: #0056b3; }
+        .btn-danger { background-color: #dc3545; margin-top: 10px; }
+        
+        #videoElement { width: 100%; max-height: 50vh; object-fit: cover; border-radius: 8px; border: 2px solid #28a745; background-color: #000; }
+        
+        .img-container { max-width: 100%; max-height: 60vh; margin-bottom: 15px; }
+        img#cropImage { display: block; max-width: 100%; }
+        
+        .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; margin-top: 15px; }
+        table { width: 100%; min-width: 600px; border-collapse: collapse; background-color: white; }
+        th, td { border: 1px solid #ccc; padding: 10px 8px; text-align: center; font-size: 14px; }
+        th { background-color: #e9ecef; color: #333; white-space: nowrap; }
+        
+        .data-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 15px; margin-top: 10px; }
+        .mini-table { font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); min-width: unset; }
+        .mini-table th { background-color: #fdfdfd; padding: 8px; font-size: 13px; white-space: normal; }
+        .mini-table td { padding: 6px; }
+        .boom-title { text-align: center; font-weight: bold; color: #fff; background-color: #6c757d; padding: 5px; border-radius: 5px 5px 0 0; margin-bottom: 0; font-size: 14px;}
+
+        #loading { display: none; color: #d9534f; font-weight: bold; margin-top: 15px; text-align: center; font-size: 16px; }
+        details { margin-top: 25px; background-color: #f8f9fa; border: 1px solid #ddd; padding: 15px; border-radius: 8px; }
+        summary { font-weight: bold; cursor: pointer; outline: none; color: #495057; font-size: 16px; }
+        
+        .badge-error { background-color: #f8d7da; color: #721c24; padding: 3px 6px; border-radius: 4px; font-size: 0.9em; }
+        .badge-warning { color: #856404; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+
+    <h2>危險機械荷重表運算系統</h2>
+
+    <div class="section" id="uploadSection">
+        <h3>1. 載入荷重表</h3>
+        
+        <div id="btnGroup">
+            <button class="btn btn-camera" onclick="triggerCamera()">📸 拍照並擷取</button>
+            <button class="btn btn-upload" onclick="triggerUpload()">📁 從裝置上傳圖檔或 PDF</button>
+            <input type="file" id="fileInput" style="display: none;" onchange="handleFileSelection(this)">
+        </div>
+
+        <div id="cameraView" style="display: none; margin-top: 15px; text-align: center;">
+            <video id="videoElement" autoplay playsinline muted></video>
+            <button class="btn btn-camera" onclick="takeSnapshot()" style="font-size: 18px; border-radius: 50px; padding: 15px; margin-top: 10px; background-color: #dc3545;">🔴 拍下這張表</button>
+            <button class="btn btn-upload" onclick="closeCamera()" style="background-color: #6c757d; margin-top: 10px;">✖️ 關閉相機</button>
+        </div>
+        
+        <p id="loading">🚀 正在傳送至 AI 進行判讀，請稍候...</p>
+    </div>
+
+    <div id="cropSection" class="section" style="display: none;">
+        <h3>📐 框選表格範圍</h3>
+        <p style="color: #666; font-size: 14px;">請拖拉方塊，僅保留荷重表的部分，減少 AI 誤判。</p>
+        <div class="img-container">
+            <img id="cropImage" src="">
+        </div>
+        <button class="btn btn-calc" onclick="confirmCropAndSend()">✅ 確認範圍並送出判讀</button>
+        <button class="btn btn-danger" onclick="cancelCrop()">✖️ 取消重來</button>
+    </div>
+
+    <div id="inputSection" class="section" style="display: none;">
+        <h3>2. 輸入吊掛條件</h3>
+        <p>重量單位: <strong id="weightUnitStr" style="color: #0056b3;"></strong></p>
+        
+        <label>額定荷重 (<span class="unitLabel"></span>): <input type="number" id="loadWeight" step="0.01" placeholder="未輸入以 0 計算"></label>
+        
+        <div style="margin-top: 15px;">
+            <label>吊鉤重量 (<span class="unitLabel"></span>): <input type="number" id="hookWeight" step="0.01" placeholder="未輸入以 0 計算"></label>
+        </div>
+        
+        <button class="btn btn-calc" onclick="calculateRadius()">⚙️ 計算作業半徑</button>
+
+        <details>
+            <summary>📊 點此展開確認 AI 判讀的原始數據</summary>
+            <div id="visualizedData" class="data-grid"></div>
+        </details>
+    </div>
+
+    <div id="resultSection" class="section" style="display: none;">
+        <h3>3. 作業半徑計算結果 (m)</h3>
+        
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th>伸臂長度/角度</th>
+                        <th>重量 -10%<br><span id="weight90" style="font-size: 0.85em; font-weight: normal;"></span></th>
+                        <th>標準重量<br><span id="weight100" style="font-size: 0.85em; font-weight: normal;"></span></th>
+                        <th>重量 +10%<br><span id="weight110" style="font-size: 0.85em; font-weight: normal;"></span></th>
+                        <th>÷ 1.25 倍<br><span id="weight125" style="font-size: 0.85em; font-weight: normal;"></span></th>
+                        <th>÷ 1.27 倍<br><span id="weight127" style="font-size: 0.85em; font-weight: normal;"></span></th>
+                    </tr>
+                </thead>
+                <tbody id="resultTableBody"></tbody>
+            </table>
+        </div>
+        
+        <button class="btn btn-upload" onclick="resetSystem()" style="margin-top: 20px;">🔄 重新判讀另一張表</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+        // ★★★ 請將下方引號內的網址替換為您 GAS 部署後產生的網頁應用程式網址 ★★★
+        const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwwEzOHR1WAmrmt6zrKTpDRHS65jYxv8pmSbN3PhUx2kUIQ9pKp2ivCfy3LavoCvVYevQ/exec';
+
+        let chartData = null;
+        let videoStream = null;
+        let cropper = null;
+
+        function triggerCamera() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                fallbackToNativeCamera();
+                return;
+            }
+            const cameraView = document.getElementById('cameraView');
+            const video = document.getElementById('videoElement');
+            const btnGroup = document.getElementById('btnGroup');
+
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+            .then(function(stream) {
+                videoStream = stream;
+                video.srcObject = stream;
+                video.play();
+                btnGroup.style.display = 'none';
+                cameraView.style.display = 'block';
+            })
+            .catch(function(err) {
+                console.warn("無法開啟網頁相機，切換至原生相機模式: " + err.message);
+                fallbackToNativeCamera();
+            });
+        }
+
+        function fallbackToNativeCamera() {
+            const fileInput = document.getElementById('fileInput');
+            fileInput.setAttribute('accept', 'image/*');
+            fileInput.setAttribute('capture', 'environment'); 
+            fileInput.click();
+        }
+
+        function triggerUpload() {
+            const fileInput = document.getElementById('fileInput');
+            fileInput.setAttribute('accept', 'image/*,application/pdf');
+            fileInput.removeAttribute('capture'); 
+            fileInput.click();
+        }
+
+        function takeSnapshot() {
+            const video = document.getElementById('videoElement');
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            const base64Data = canvas.toDataURL('image/jpeg', 0.9);
+            closeCamera();
+            showCropper(base64Data);
+        }
+
+        function closeCamera() {
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                videoStream = null;
+            }
+            document.getElementById('cameraView').style.display = 'none';
+            document.getElementById('btnGroup').style.display = 'block';
+        }
+
+        function handleFileSelection(inputElement) {
+            if (inputElement.files.length === 0) return;
+            const file = inputElement.files[0];
+            
+            if (file.type === 'application/pdf') {
+                renderPDFToImage(file);
+            } else {
+                const reader = new FileReader();
+                reader.onload = function(e) { showCropper(e.target.result); };
+                reader.readAsDataURL(file);
+            }
+            inputElement.value = ''; 
+        }
+
+        async function renderPDFToImage(file) {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('btnGroup').style.display = 'none';
+            document.getElementById('loading').innerText = "📄 正在解析 PDF 檔案...";
+
+            const fileReader = new FileReader();
+            fileReader.onload = async function() {
+                try {
+                    const typedarray = new Uint8Array(this.result);
+                    const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                    const page = await pdf.getPage(1); 
+
+                    const viewport = page.getViewport({scale: 2.0});
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+
+                    await page.render({canvasContext: ctx, viewport: viewport}).promise;
+                    
+                    document.getElementById('loading').style.display = 'none';
+                    showCropper(canvas.toDataURL('image/jpeg', 0.9));
+                } catch (err) {
+                    alert("PDF 解析失敗: " + err.message);
+                    resetSystem();
+                }
+            };
+            fileReader.readAsArrayBuffer(file);
+        }
+
+        function showCropper(imageSrc) {
+            document.getElementById('uploadSection').style.display = 'none';
+            document.getElementById('cropSection').style.display = 'block';
+            
+            const image = document.getElementById('cropImage');
+            image.src = imageSrc;
+
+            if (cropper) { cropper.destroy(); }
+            
+            cropper = new Cropper(image, {
+                viewMode: 1,
+                autoCropArea: 0.9,
+                responsive: true,
+                background: true
+            });
+        }
+
+        function cancelCrop() {
+            document.getElementById('cropSection').style.display = 'none';
+            document.getElementById('btnGroup').style.display = 'block';
+            document.getElementById('uploadSection').style.display = 'block';
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('loading').innerText = "🚀 正在傳送至 AI 進行判讀，請稍候...";
+            if (cropper) { cropper.destroy(); cropper = null; }
+        }
+
+        function confirmCropAndSend() {
+            if (!cropper) return;
+            
+            const canvas = cropper.getCroppedCanvas({ maxWidth: 2048, maxHeight: 2048 });
+            const base64Data = canvas.toDataURL('image/jpeg', 0.9);
+            
+            document.getElementById('cropSection').style.display = 'none';
+            document.getElementById('uploadSection').style.display = 'block';
+            document.getElementById('loading').innerText = "🚀 正在傳送擷取範圍至 AI 進行判讀，請稍候...";
+            sendToGAS(base64Data, 'image/jpeg');
+        }
+
+        // 改寫通訊邏輯：使用 Fetch API 發送給 GAS
+        function sendToGAS(base64String, mimeType) {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('inputSection').style.display = 'none';
+            document.getElementById('resultSection').style.display = 'none';
+            document.getElementById('btnGroup').style.display = 'none';
+
+            const payload = { base64: base64String, mimeType: mimeType };
+
+            // 加上 text/plain header 以繞過瀏覽器嚴格的 CORS 預檢
+            fetch(GAS_WEB_APP_URL, {
+                method: 'POST',
+                body: JSON.stringify(payload),
+                headers: {
+                    'Content-Type': 'text/plain;charset=utf-8' 
+                },
+                redirect: 'follow'
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('loading').style.display = 'none';
+                if(data.error) {
+                    alert("判讀發生錯誤: " + data.error);
+                    resetSystem();
+                    return;
+                }
+                chartData = data;
+                setupInputForm();
+            })
+            .catch(error => {
+                document.getElementById('loading').style.display = 'none';
+                alert("伺服器連線失敗：" + error);
+                resetSystem();
+            });
+        }
+
+        function getSortedKeysSafe() {
+            if (!chartData || !chartData.data) return [];
+            return Object.keys(chartData.data).sort((a, b) => {
+                let numA = parseFloat(a);
+                let numB = parseFloat(b);
+                if (isNaN(numA)) numA = 0;
+                if (isNaN(numB)) numB = 0;
+                return numA - numB;
+            });
+        }
+
+        function setupInputForm() {
+            document.getElementById('uploadSection').style.display = 'none';
+            document.getElementById('inputSection').style.display = 'block';
+            
+            document.getElementById('weightUnitStr').innerText = chartData.unit || 't';
+            document.querySelectorAll('.unitLabel').forEach(el => el.innerText = chartData.unit || 't');
+            
+            document.getElementById('loadWeight').value = '';
+            document.getElementById('hookWeight').value = '';
+
+            generateVisualizedData();
+        }
+
+        function generateVisualizedData() {
+            const container = document.getElementById('visualizedData');
+            container.innerHTML = ''; 
+
+            const sortedKeys = getSortedKeysSafe();
+
+            sortedKeys.forEach(key => {
+                const points = chartData.data[key];
+                
+                let html = `<div><div class="boom-title">條件: ${key}</div><table class="mini-table">`;
+                
+                if (!Array.isArray(points) || points.length === 0) {
+                    html += `<tbody><tr><td class="badge-error" style="text-align:center; padding: 15px;">此欄位判讀失敗</td></tr></tbody></table></div>`;
+                    container.innerHTML += html;
+                    return;
+                }
+
+                points.sort((a, b) => a.radius - b.radius);
+                html += `<thead><tr><th>半徑(m)</th><th>荷重(${chartData.unit || 't'})</th></tr></thead><tbody>`;
+                points.forEach(p => { html += `<tr><td>${p.radius}</td><td>${p.load}</td></tr>`; });
+                html += `</tbody></table></div>`;
+                container.innerHTML += html;
+            });
+        }
+
+        function calculateRadius() {
+            if (!chartData || !chartData.data) return;
+
+            let ratedLoad = parseFloat(document.getElementById('loadWeight').value) || 0;
+            let hook = parseFloat(document.getElementById('hookWeight').value) || 0;
+            
+            let w100 = ratedLoad + hook;
+            if (w100 <= 0) { alert("請至少輸入一個大於 0 的重量！"); return; }
+
+            let w110 = w100 * 1.1; 
+            let w90  = w100 * 0.9; 
+            let w125 = (ratedLoad / 1.25) + hook;
+            let w127 = (ratedLoad / 1.27) + hook;
+
+            document.getElementById('weight90').innerText = `(${w90.toFixed(2)} ${chartData.unit || 't'})`;
+            document.getElementById('weight100').innerText = `(${w100.toFixed(2)} ${chartData.unit || 't'})`;
+            document.getElementById('weight110').innerText = `(${w110.toFixed(2)} ${chartData.unit || 't'})`;
+            document.getElementById('weight125').innerText = `(${w125.toFixed(2)} ${chartData.unit || 't'})`;
+            document.getElementById('weight127').innerText = `(${w127.toFixed(2)} ${chartData.unit || 't'})`;
+
+            const tbody = document.getElementById('resultTableBody');
+            tbody.innerHTML = '';
+
+            const sortedKeys = getSortedKeysSafe();
+
+            for (const key of sortedKeys) {
+                const dataPoints = chartData.data[key];
+                
+                if (!Array.isArray(dataPoints) || dataPoints.length === 0) {
+                    let tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td><strong>${key}</strong></td>
+                        <td colspan="5" class="badge-error">該欄位 AI 判讀失敗</td>
+                    `;
+                    tbody.appendChild(tr);
+                    continue;
+                }
+                
+                let r90  = doInterpolation(w90, dataPoints);
+                let r100 = doInterpolation(w100, dataPoints);
+                let r110 = doInterpolation(w110, dataPoints);
+                let r125 = doInterpolation(w125, dataPoints);
+                let r127 = doInterpolation(w127, dataPoints);
+
+                let tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${key}</strong></td>
+                    <td style="color: #28a745;">${r90}</td>
+                    <td style="font-weight: bold; font-size: 1.1em;">${r100}</td>
+                    <td style="color: #d9534f;">${r110}</td>
+                    <td style="color: #17a2b8;">${r125}</td>
+                    <td style="color: #6f42c1;">${r127}</td>
+                `;
+                tbody.appendChild(tr);
+            }
+            
+            document.getElementById('resultSection').style.display = 'block';
+            document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function doInterpolation(targetWeight, points) {
+            points.sort((a, b) => a.radius - b.radius); 
+
+            if (targetWeight > points[0].load) return "<span class='badge-warning'>超出範圍</span>";
+            if (targetWeight < points[points.length - 1].load) return "<span class='badge-warning'>超出範圍</span>";
+
+            for (let i = 0; i < points.length - 1; i++) {
+                let p1 = points[i], p2 = points[i + 1];
+                if (targetWeight <= p1.load && targetWeight >= p2.load) {
+                    if (p1.load === p2.load) return p1.radius.toFixed(2);
+                    let r = p1.radius + ((targetWeight - p1.load) * (p2.radius - p1.radius)) / (p2.load - p1.load);
+                    return r.toFixed(2);
+                }
+            }
+            return "<span class='badge-warning'>超出範圍</span>";
+        }
+
+        function resetSystem() {
+            document.getElementById('cropSection').style.display = 'none';
+            document.getElementById('inputSection').style.display = 'none';
+            document.getElementById('resultSection').style.display = 'none';
+            document.getElementById('uploadSection').style.display = 'block';
+            document.getElementById('btnGroup').style.display = 'block';
+            document.getElementById('loading').style.display = 'none';
+            if (cropper) { cropper.destroy(); cropper = null; }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    </script>
+</body>
+</html>
