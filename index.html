@@ -45,6 +45,18 @@
         
         .badge-error { background-color: #f8d7da; color: #721c24; padding: 3px 6px; border-radius: 4px; font-size: 0.9em; }
         .badge-warning { color: #856404; font-size: 0.9em; }
+
+        /* --- 新增：懸浮說明按鈕與彈出視窗樣式 --- */
+        .fab-btn { position: fixed; bottom: 20px; right: 20px; background-color: #ffc107; color: #333; width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); cursor: pointer; z-index: 1000; transition: 0.3s; border: none; }
+        .fab-btn:hover { background-color: #e0a800; transform: scale(1.05); }
+        
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 1001; align-items: center; justify-content: center; }
+        .modal-content { background: #fff; padding: 25px; border-radius: 10px; width: 90%; max-width: 400px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); position: relative; }
+        .modal-content h3 { margin-top: 0; color: #333; border-bottom: 2px solid #ffc107; padding-bottom: 10px; }
+        .modal-content ol { padding-left: 20px; line-height: 1.6; color: #444; }
+        .modal-content li { margin-bottom: 10px; }
+        .close-modal-btn { background-color: #6c757d; color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; width: 100%; font-size: 16px; margin-top: 15px; }
+        .close-modal-btn:hover { background-color: #5a6268; }
     </style>
 </head>
 <body>
@@ -119,17 +131,47 @@
         <button class="btn btn-upload" onclick="resetSystem()" style="margin-top: 20px;">🔄 重新判讀另一張表</button>
     </div>
 
+    <button class="fab-btn" onclick="openModal()" title="系統說明">💡</button>
+
+    <div class="modal-overlay" id="infoModal" onclick="closeModalOnOutsideClick(event)">
+        <div class="modal-content">
+            <h3>💡 系統使用說明</h3>
+            <ol>
+                <li>荷重表使用 AI 判讀，要是判斷不出來可嘗試再次照相上傳。</li>
+                <li>不判斷額定荷重表 / 吊升荷重表，如果是額定荷重表，不輸入吊鉤重量即可。</li>
+                <li>分出吊鉤重量主要是處理 125% 及 127% 問題，100% 時都是直接將額定荷重 + 吊鉤重加總計算。</li>
+            </ol>
+            <button class="close-modal-btn" onclick="closeModal()">了解</button>
+        </div>
+    </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-        // ★★★ 請將下方引號內的網址替換為您 GAS 部署後產生的網頁應用程式網址 ★★★
-        const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzv5PytWTGVAZJ3LSKE9j96LLNkPIUOBI5q3qd7jgZ_I38BaJ9eSFOKmn9fD16IDXTrkQ/exec';
+        // ★★★ 請替換為您 GAS 的 Web App URL ★★★
+        const GAS_WEB_APP_URL = 'YOUR_GAS_WEB_APP_URL_HERE';
 
         let chartData = null;
         let videoStream = null;
         let cropper = null;
+
+        /* --- 新增：彈出視窗控制邏輯 --- */
+        function openModal() {
+            const modal = document.getElementById('infoModal');
+            modal.style.display = 'flex';
+        }
+        function closeModal() {
+            const modal = document.getElementById('infoModal');
+            modal.style.display = 'none';
+        }
+        function closeModalOnOutsideClick(event) {
+            const modal = document.getElementById('infoModal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+        /* -------------------------- */
 
         function triggerCamera() {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -272,7 +314,6 @@
             sendToGAS(base64Data, 'image/jpeg');
         }
 
-        // 改寫通訊邏輯：使用 Fetch API 發送給 GAS
         function sendToGAS(base64String, mimeType) {
             document.getElementById('loading').style.display = 'block';
             document.getElementById('inputSection').style.display = 'none';
@@ -281,13 +322,10 @@
 
             const payload = { base64: base64String, mimeType: mimeType };
 
-            // 加上 text/plain header 以繞過瀏覽器嚴格的 CORS 預檢
             fetch(GAS_WEB_APP_URL, {
                 method: 'POST',
                 body: JSON.stringify(payload),
-                headers: {
-                    'Content-Type': 'text/plain;charset=utf-8' 
-                },
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 redirect: 'follow'
             })
             .then(response => response.json())
