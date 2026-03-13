@@ -46,10 +46,9 @@
         .badge-error { background-color: #f8d7da; color: #721c24; padding: 3px 6px; border-radius: 4px; font-size: 0.9em; }
         .badge-warning { color: #856404; font-size: 0.9em; }
 
-        /* --- 新增：懸浮說明按鈕與彈出視窗樣式 --- */
+        /* 說明按鈕樣式 */
         .fab-btn { position: fixed; bottom: 20px; right: 20px; background-color: #ffc107; color: #333; width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); cursor: pointer; z-index: 1000; transition: 0.3s; border: none; }
         .fab-btn:hover { background-color: #e0a800; transform: scale(1.05); }
-        
         .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 1001; align-items: center; justify-content: center; }
         .modal-content { background: #fff; padding: 25px; border-radius: 10px; width: 90%; max-width: 400px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); position: relative; }
         .modal-content h3 { margin-top: 0; color: #333; border-bottom: 2px solid #ffc107; padding-bottom: 10px; }
@@ -57,6 +56,12 @@
         .modal-content li { margin-bottom: 10px; }
         .close-modal-btn { background-color: #6c757d; color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; width: 100%; font-size: 16px; margin-top: 15px; }
         .close-modal-btn:hover { background-color: #5a6268; }
+
+        /* 新增：PDF換頁控制列樣式 */
+        .pdf-controls { display: flex; justify-content: space-between; align-items: center; background: #e9ecef; padding: 10px; border-radius: 8px; margin-bottom: 15px; }
+        .pdf-controls button { width: auto; margin: 0; padding: 8px 15px; background-color: #6c757d; font-size: 14px; }
+        .pdf-controls button:disabled { background-color: #ccc; cursor: not-allowed; }
+        .pdf-page-info { font-weight: bold; color: #333; }
     </style>
 </head>
 <body>
@@ -83,7 +88,14 @@
 
     <div id="cropSection" class="section" style="display: none;">
         <h3>📐 框選表格範圍</h3>
-        <p style="color: #666; font-size: 14px;">請拖拉方塊，僅保留荷重表的部分，減少 AI 誤判。</p>
+        
+        <div id="pdfControls" class="pdf-controls" style="display: none;">
+            <button class="btn" id="btnPrevPdf" onclick="prevPdfPage()">⬅️ 上一頁</button>
+            <div class="pdf-page-info">第 <span id="pageNum">1</span> / <span id="pageCount">1</span> 頁</div>
+            <button class="btn" id="btnNextPdf" onclick="nextPdfPage()">下一頁 ➡️</button>
+        </div>
+
+        <p style="color: #666; font-size: 14px; margin-top: 0;">請拖拉方塊，僅保留荷重表的部分，減少 AI 誤判。</p>
         <div class="img-container">
             <img id="cropImage" src="">
         </div>
@@ -132,7 +144,6 @@
     </div>
 
     <button class="fab-btn" onclick="openModal()" title="系統說明">💡</button>
-
     <div class="modal-overlay" id="infoModal" onclick="closeModalOnOutsideClick(event)">
         <div class="modal-content">
             <h3>💡 系統使用說明</h3>
@@ -144,6 +155,7 @@
             <button class="close-modal-btn" onclick="closeModal()">了解</button>
         </div>
     </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script>
@@ -156,22 +168,13 @@
         let videoStream = null;
         let cropper = null;
 
-        /* --- 新增：彈出視窗控制邏輯 --- */
-        function openModal() {
-            const modal = document.getElementById('infoModal');
-            modal.style.display = 'flex';
-        }
-        function closeModal() {
-            const modal = document.getElementById('infoModal');
-            modal.style.display = 'none';
-        }
-        function closeModalOnOutsideClick(event) {
-            const modal = document.getElementById('infoModal');
-            if (event.target === modal) {
-                closeModal();
-            }
-        }
-        /* -------------------------- */
+        // 新增：PDF 全局變數
+        let currentPdfDoc = null;
+        let currentPdfPageNum = 1;
+
+        function openModal() { document.getElementById('infoModal').style.display = 'flex'; }
+        function closeModal() { document.getElementById('infoModal').style.display = 'none'; }
+        function closeModalOnOutsideClick(event) { if (event.target === document.getElementById('infoModal')) closeModal(); }
 
         function triggerCamera() {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -191,7 +194,7 @@
                 cameraView.style.display = 'block';
             })
             .catch(function(err) {
-                console.warn("無法開啟網頁相機，切換至原生相機模式: " + err.message);
+                console.warn("無法開啟網頁相機，切換至原生相機模式");
                 fallbackToNativeCamera();
             });
         }
@@ -220,7 +223,7 @@
             
             const base64Data = canvas.toDataURL('image/jpeg', 0.9);
             closeCamera();
-            showCropper(base64Data);
+            showCropper(base64Data, false); // false 代表這不是 PDF
         }
 
         function closeCamera() {
@@ -237,16 +240,17 @@
             const file = inputElement.files[0];
             
             if (file.type === 'application/pdf') {
-                renderPDFToImage(file);
+                loadPDFDocument(file);
             } else {
                 const reader = new FileReader();
-                reader.onload = function(e) { showCropper(e.target.result); };
+                reader.onload = function(e) { showCropper(e.target.result, false); };
                 reader.readAsDataURL(file);
             }
             inputElement.value = ''; 
         }
 
-        async function renderPDFToImage(file) {
+        // --- PDF 多頁處理邏輯 ---
+        async function loadPDFDocument(file) {
             document.getElementById('loading').style.display = 'block';
             document.getElementById('btnGroup').style.display = 'none';
             document.getElementById('loading').innerText = "📄 正在解析 PDF 檔案...";
@@ -255,19 +259,11 @@
             fileReader.onload = async function() {
                 try {
                     const typedarray = new Uint8Array(this.result);
-                    const pdf = await pdfjsLib.getDocument(typedarray).promise;
-                    const page = await pdf.getPage(1); 
-
-                    const viewport = page.getViewport({scale: 2.0});
-                    const canvas = document.createElement('canvas');
-                    const ctx = canvas.getContext('2d');
-                    canvas.height = viewport.height;
-                    canvas.width = viewport.width;
-
-                    await page.render({canvasContext: ctx, viewport: viewport}).promise;
+                    currentPdfDoc = await pdfjsLib.getDocument(typedarray).promise;
+                    currentPdfPageNum = 1;
                     
-                    document.getElementById('loading').style.display = 'none';
-                    showCropper(canvas.toDataURL('image/jpeg', 0.9));
+                    document.getElementById('pageCount').innerText = currentPdfDoc.numPages;
+                    await renderSpecificPdfPage(currentPdfPageNum);
                 } catch (err) {
                     alert("PDF 解析失敗: " + err.message);
                     resetSystem();
@@ -276,10 +272,55 @@
             fileReader.readAsArrayBuffer(file);
         }
 
-        function showCropper(imageSrc) {
+        async function renderSpecificPdfPage(pageNum) {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('loading').innerText = `📄 正在渲染第 ${pageNum} 頁...`;
+            document.getElementById('pageNum').innerText = pageNum;
+            updatePdfButtons();
+
+            const page = await currentPdfDoc.getPage(pageNum); 
+            const viewport = page.getViewport({scale: 2.0}); // scale: 2.0 保持高解析度
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+
+            await page.render({canvasContext: ctx, viewport: viewport}).promise;
+            
+            document.getElementById('loading').style.display = 'none';
+            showCropper(canvas.toDataURL('image/jpeg', 0.9), true); // true 代表這是 PDF
+        }
+
+        async function prevPdfPage() {
+            if (!currentPdfDoc || currentPdfPageNum <= 1) return;
+            currentPdfPageNum--;
+            await renderSpecificPdfPage(currentPdfPageNum);
+        }
+
+        async function nextPdfPage() {
+            if (!currentPdfDoc || currentPdfPageNum >= currentPdfDoc.numPages) return;
+            currentPdfPageNum++;
+            await renderSpecificPdfPage(currentPdfPageNum);
+        }
+
+        function updatePdfButtons() {
+            document.getElementById('btnPrevPdf').disabled = (currentPdfPageNum <= 1);
+            document.getElementById('btnNextPdf').disabled = (currentPdfPageNum >= currentPdfDoc.numPages);
+        }
+        // ----------------------
+
+        function showCropper(imageSrc, isPdf) {
             document.getElementById('uploadSection').style.display = 'none';
             document.getElementById('cropSection').style.display = 'block';
             
+            // 只有上傳 PDF 且總頁數大於 1 頁時，才顯示換頁控制列
+            const pdfControls = document.getElementById('pdfControls');
+            if (isPdf && currentPdfDoc && currentPdfDoc.numPages > 1) {
+                pdfControls.style.display = 'flex';
+            } else {
+                pdfControls.style.display = 'none';
+            }
+
             const image = document.getElementById('cropImage');
             image.src = imageSrc;
 
@@ -299,6 +340,11 @@
             document.getElementById('uploadSection').style.display = 'block';
             document.getElementById('loading').style.display = 'none';
             document.getElementById('loading').innerText = "🚀 正在傳送至 AI 進行判讀，請稍候...";
+            
+            // 清除 PDF 暫存
+            currentPdfDoc = null;
+            currentPdfPageNum = 1;
+
             if (cropper) { cropper.destroy(); cropper = null; }
         }
 
@@ -479,6 +525,11 @@
             document.getElementById('uploadSection').style.display = 'block';
             document.getElementById('btnGroup').style.display = 'block';
             document.getElementById('loading').style.display = 'none';
+            
+            // 重置 PDF 狀態
+            currentPdfDoc = null;
+            currentPdfPageNum = 1;
+
             if (cropper) { cropper.destroy(); cropper = null; }
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
