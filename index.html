@@ -57,7 +57,7 @@
         .close-modal-btn { background-color: #6c757d; color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; width: 100%; font-size: 16px; margin-top: 15px; }
         .close-modal-btn:hover { background-color: #5a6268; }
 
-        /* 新增：PDF換頁控制列樣式 */
+        /* PDF換頁控制列樣式 */
         .pdf-controls { display: flex; justify-content: space-between; align-items: center; background: #e9ecef; padding: 10px; border-radius: 8px; margin-bottom: 15px; }
         .pdf-controls button { width: auto; margin: 0; padding: 8px 15px; background-color: #6c757d; font-size: 14px; }
         .pdf-controls button:disabled { background-color: #ccc; cursor: not-allowed; }
@@ -167,8 +167,6 @@
         let chartData = null;
         let videoStream = null;
         let cropper = null;
-
-        // 新增：PDF 全局變數
         let currentPdfDoc = null;
         let currentPdfPageNum = 1;
 
@@ -194,7 +192,7 @@
                 cameraView.style.display = 'block';
             })
             .catch(function(err) {
-                console.warn("無法開啟網頁相機，切換至原生相機模式");
+                console.warn("無法開啟網頁相機，切換至原生相機模式: " + err.message);
                 fallbackToNativeCamera();
             });
         }
@@ -223,7 +221,7 @@
             
             const base64Data = canvas.toDataURL('image/jpeg', 0.9);
             closeCamera();
-            showCropper(base64Data, false); // false 代表這不是 PDF
+            showCropper(base64Data, false); 
         }
 
         function closeCamera() {
@@ -249,7 +247,6 @@
             inputElement.value = ''; 
         }
 
-        // --- PDF 多頁處理邏輯 ---
         async function loadPDFDocument(file) {
             document.getElementById('loading').style.display = 'block';
             document.getElementById('btnGroup').style.display = 'none';
@@ -279,7 +276,7 @@
             updatePdfButtons();
 
             const page = await currentPdfDoc.getPage(pageNum); 
-            const viewport = page.getViewport({scale: 2.0}); // scale: 2.0 保持高解析度
+            const viewport = page.getViewport({scale: 2.0});
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             canvas.height = viewport.height;
@@ -288,7 +285,7 @@
             await page.render({canvasContext: ctx, viewport: viewport}).promise;
             
             document.getElementById('loading').style.display = 'none';
-            showCropper(canvas.toDataURL('image/jpeg', 0.9), true); // true 代表這是 PDF
+            showCropper(canvas.toDataURL('image/jpeg', 0.9), true);
         }
 
         async function prevPdfPage() {
@@ -307,13 +304,11 @@
             document.getElementById('btnPrevPdf').disabled = (currentPdfPageNum <= 1);
             document.getElementById('btnNextPdf').disabled = (currentPdfPageNum >= currentPdfDoc.numPages);
         }
-        // ----------------------
 
         function showCropper(imageSrc, isPdf) {
             document.getElementById('uploadSection').style.display = 'none';
             document.getElementById('cropSection').style.display = 'block';
             
-            // 只有上傳 PDF 且總頁數大於 1 頁時，才顯示換頁控制列
             const pdfControls = document.getElementById('pdfControls');
             if (isPdf && currentPdfDoc && currentPdfDoc.numPages > 1) {
                 pdfControls.style.display = 'flex';
@@ -341,7 +336,6 @@
             document.getElementById('loading').style.display = 'none';
             document.getElementById('loading').innerText = "🚀 正在傳送至 AI 進行判讀，請稍候...";
             
-            // 清除 PDF 暫存
             currentPdfDoc = null;
             currentPdfPageNum = 1;
 
@@ -450,8 +444,9 @@
             let w100 = ratedLoad + hook;
             if (w100 <= 0) { alert("請至少輸入一個大於 0 的重量！"); return; }
 
-            let w110 = w100 * 1.1; 
-            let w90  = w100 * 0.9; 
+            // ★ 修正此處計算邏輯：正負10% 僅針對額定荷重，吊鉤為物理常數
+            let w110 = (ratedLoad * 1.1) + hook; 
+            let w90  = (ratedLoad * 0.9) + hook; 
             let w125 = (ratedLoad / 1.25) + hook;
             let w127 = (ratedLoad / 1.27) + hook;
 
@@ -526,7 +521,6 @@
             document.getElementById('btnGroup').style.display = 'block';
             document.getElementById('loading').style.display = 'none';
             
-            // 重置 PDF 狀態
             currentPdfDoc = null;
             currentPdfPageNum = 1;
 
